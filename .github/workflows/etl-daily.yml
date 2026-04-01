@@ -1,0 +1,42 @@
+# Daily MLB schedule ingest. Cron is UTC; ingest uses the previous America/New_York calendar day (yesterday).
+# Repository secret: DATABASE_URL (SQLAlchemy URL, e.g. postgresql+psycopg2://...)
+name: ETL daily
+
+on:
+  schedule:
+    # 11:00 UTC (~6–7 AM Eastern). Adjust if you want a different wall-clock.
+    - cron: "0 11 * * *"
+  workflow_dispatch:
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Run schedule ingest
+        run: |
+          set -o pipefail
+          DATES=$(TZ=America/New_York date -d yesterday +%Y%m%d)
+          echo "Ingesting dates=$DATES (America/New_York, yesterday)"
+          PYTHONPATH=src python -m mlbetl.run --mode schedule --dates "$DATES" --db "$DATABASE_URL" 2>&1 | tee etl.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## MLB ETL"
+            echo
+            echo '```'
+            grep '\[mlbetl\]' etl.log 2>/dev/null || echo "(no mlbetl log lines captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -59,6 +59,12 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print which mlbetl.espn file is loaded and a short parse summary per game (stderr)",
     )
+    p.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Suppress schedule/range discovery and done summary lines (stderr)",
+    )
     return p.parse_args()
 
 
@@ -112,75 +118,95 @@ def main() -> None:
     else:
         game_ids = spec  # type: ignore[assignment]
 
+    if not args.quiet:
+        if args.mode == "schedule" and args.dates:
+            print(
+                f"[mlbetl] schedule: dates={args.dates.strip()} unique_game_ids={len(game_ids)}",
+                file=sys.stderr,
+            )
+        elif args.mode == "range":
+            print(f"[mlbetl] range: unique_game_ids={len(game_ids)}", file=sys.stderr)
+
+    ok = 0
+    failed = 0
     for game_id in game_ids:
         try:
             summary = fetch_game_summary(client, game_id)
+
+            if raw_root:
+                (raw_root / f"{game_id}.json").write_text(
+                    json.dumps(summary, default=str, indent=2),
+                    encoding="utf-8",
+                )
+
+            core = parse_game_core(summary, game_id)
+            bat, pit = parse_boxscore_lines(summary)
+            cleaned = clean_game(core)
+
+            if args.verbose:
+                sp = core.starting_pitchers or {}
+                print(
+                    f"[mlbetl] game_id={game_id} venue_name={core.venue_name!r} "
+                    f"starters_home={sp.get('home')!r} starters_away={sp.get('away')!r} "
+                    f"home_record={cleaned.get('home_record')!r} away_record={cleaned.get('away_record')!r}",
+                    file=sys.stderr,
+                )
+
+            now = datetime.now(tz=timezone.utc)
+            game_row = {
+                **asdict(core),
+                **cleaned,
+                "ingested_at_utc": now,
+            }
+            upsert_game(engine, game_row)
+
+            bat_rows = [
+                {
+                    "game_id": game_id,
+                    "team_id": r.get("team_id"),
+                    "team_name": r.get("team_name"),
+                    "player_id": r.get("player_id"),
+                    "player_name": r.get("player_name"),
+                    "stats": {
+                        k: v
+                        for k, v in r.items()
+                        if k not in {"team_id", "team_name", "player_id", "player_name"}
+                    },
+                }
+                for r in bat
+            ]
+            pit_rows = [
+                {
+                    "game_id": game_id,
+                    "team_id": r.get("team_id"),
+                    "team_name": r.get("team_name"),
+                    "player_id": r.get("player_id"),
+                    "player_name": r.get("player_name"),
+                    "stats": {
+                        k: v
+                        for k, v in r.items()
+                        if k not in {"team_id", "team_name", "player_id", "player_name"}
+                    },
+                }
+                for r in pit
+            ]
+
+            replace_lines(engine, table=batting_lines, game_id=game_id, lines=bat_rows)
+            replace_lines(engine, table=pitching_lines, game_id=game_id, lines=pit_rows)
+
+            ok += 1
         except Exception:
+            failed += 1
             continue
-
-        if raw_root:
-            (raw_root / f"{game_id}.json").write_text(
-                json.dumps(summary, default=str, indent=2),
-                encoding="utf-8",
-            )
-
-        core = parse_game_core(summary, game_id)
-        bat, pit = parse_boxscore_lines(summary)
-        cleaned = clean_game(core)
-
-        if args.verbose:
-            sp = core.starting_pitchers or {}
-            print(
-                f"[mlbetl] game_id={game_id} venue_name={core.venue_name!r} "
-                f"starters_home={sp.get('home')!r} starters_away={sp.get('away')!r} "
-                f"home_record={cleaned.get('home_record')!r} away_record={cleaned.get('away_record')!r}",
-                file=sys.stderr,
-            )
-
-        now = datetime.now(tz=timezone.utc)
-        game_row = {
-            **asdict(core),
-            **cleaned,
-            "ingested_at_utc": now,
-        }
-        upsert_game(engine, game_row)
-
-        bat_rows = [
-            {
-                "game_id": game_id,
-                "team_id": r.get("team_id"),
-                "team_name": r.get("team_name"),
-                "player_id": r.get("player_id"),
-                "player_name": r.get("player_name"),
-                "stats": {
-                    k: v
-                    for k, v in r.items()
-                    if k not in {"team_id", "team_name", "player_id", "player_name"}
-                },
-            }
-            for r in bat
-        ]
-        pit_rows = [
-            {
-                "game_id": game_id,
-                "team_id": r.get("team_id"),
-                "team_name": r.get("team_name"),
-                "player_id": r.get("player_id"),
-                "player_name": r.get("player_name"),
-                "stats": {
-                    k: v
-                    for k, v in r.items()
-                    if k not in {"team_id", "team_name", "player_id", "player_name"}
-                },
-            }
-            for r in pit
-        ]
-
-        replace_lines(engine, table=batting_lines, game_id=game_id, lines=bat_rows)
-        replace_lines(engine, table=pitching_lines, game_id=game_id, lines=pit_rows)
 
         if delay:
             time.sleep(delay)
+
+    if not args.quiet:
+        print(
+            f"[mlbetl] done: scheduled={len(game_ids)} ok={ok} failed={failed}",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":
