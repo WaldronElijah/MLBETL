@@ -1,0 +1,62 @@
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Packaging / install artifacts
+*.egg
+*.egg-info/
+*.eggs/
+dist/
+build/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.envrc
+
+# Secrets and local env (keep .env.example tracked if you add one)
+.env
+.env.*
+!.env.example
+
+# Testing / coverage / type-check caches
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local / generated raw pulls (use --save-raw or re-fetch)
+/data/raw/*
+!/data/raw/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# JetBrains / PyCharm
+.idea/
+
+# VS Code (uncomment if you do not want shared workspace settings in git)
+# .vscode/
+
+# Cursor (local plans / machine state; uncomment if present in repo root)
+# .cursor/
