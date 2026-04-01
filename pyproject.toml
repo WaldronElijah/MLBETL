@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlbetl"
+version = "0.1.0"
+description = "ESPN MLB ETL to Postgres"
+requires-python = ">=3.9"
+dependencies = [
+  "requests>=2.32.0",
+  "tenacity>=8.2.0",
+  "SQLAlchemy>=2.0.0",
+  "psycopg2-binary>=2.9.0",
+  "python-dateutil>=2.9.0",
+  "python-dotenv>=1.0.0",
+  "alembic>=1.13.0",
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "pydantic>=2.0.0",
+]
+
+[project.scripts]
+mlbetl-ingest = "mlbetl.run:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
