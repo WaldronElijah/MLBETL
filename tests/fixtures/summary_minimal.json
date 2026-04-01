@@ -1,0 +1,70 @@
+{
+  "header": {
+    "competitions": [
+      {
+        "date": "2025-03-30T23:05Z",
+        "status": { "type": { "description": "Final" } },
+        "competitors": [
+          {
+            "homeAway": "home",
+            "score": "5",
+            "team": { "displayName": "New York Yankees" },
+            "probables": [],
+            "record": [{ "type": "total", "summary": "10-5" }]
+          },
+          {
+            "homeAway": "away",
+            "score": "3",
+            "team": { "displayName": "Boston Red Sox" },
+            "probables": [],
+            "record": [{ "type": "total", "summary": "8-7" }]
+          }
+        ],
+        "venue": {
+          "fullName": "Yankee Stadium",
+          "address": { "city": "Bronx", "state": "NY" }
+        },
+        "odds": [
+          {
+            "spread": -1.5,
+            "overUnder": 8.5,
+            "provider": { "name": "DraftKings" }
+          }
+        ]
+      }
+    ],
+    "status": { "type": { "description": "Final" } }
+  },
+  "boxscore": {
+    "players": [
+      {
+        "team": { "id": 10, "displayName": "New York Yankees" },
+        "statistics": [
+          {
+            "name": "batting",
+            "keys": ["ab", "h"],
+            "athletes": [
+              {
+                "athlete": { "id": 1001, "displayName": "Sample Hitter" },
+                "stats": ["4", "2"]
+              }
+            ]
+          },
+          {
+            "name": "pitching",
+            "keys": ["ip", "er"],
+            "athletes": [
+              {
+                "athlete": { "id": 2001, "displayName": "Sample Pitcher" },
+                "stats": ["6.0", "1"]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "gameInfo": {
+    "officials": [{ "displayName": "HP Umpire" }]
+  }
+}
