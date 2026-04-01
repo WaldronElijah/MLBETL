@@ -10,6 +10,9 @@ from dateutil import parser as date_parser
 from mlbetl.config import get_settings
 from mlbetl.http import HttpClient
 
+# Bump when parse_game_core extraction logic changes (helps verify which code is running).
+PARSER_EXTRACT_REVISION = 2
+
 
 def _dig(obj: Any, *path: Any) -> Any:
     cur = obj

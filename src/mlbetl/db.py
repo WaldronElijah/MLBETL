@@ -102,10 +102,16 @@ def create_tables(engine: Engine) -> None:
 
 
 def upsert_game(engine: Engine, row: dict[str, Any]) -> None:
-    stmt = pg_insert(games).values(**row)
+    allowed = {c.name for c in games.c}
+    clean_row = {k: v for k, v in row.items() if k in allowed}
+    stmt = pg_insert(games).values(**clean_row)
     stmt = stmt.on_conflict_do_update(
         index_elements=[games.c.game_id],
-        set_={k: stmt.excluded[k] for k in row.keys() if k != "game_id"},
+        set_={
+            k: getattr(stmt.excluded, k)
+            for k in clean_row
+            if k != "game_id"
+        },
     )
     with engine.begin() as conn:
         conn.execute(stmt)

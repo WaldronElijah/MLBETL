@@ -53,6 +53,12 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Seconds to sleep between ESPN requests (default ESPN_REQUEST_DELAY_S or 0.35)",
     )
+    p.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Print which mlbetl.espn file is loaded and a short parse summary per game (stderr)",
+    )
     return p.parse_args()
 
 
@@ -73,6 +79,14 @@ def main() -> None:
     args = _parse_args()
     settings = get_settings()
     delay = args.sleep if args.sleep is not None else settings.request_delay_s
+
+    if args.verbose:
+        import mlbetl.espn as _espn_mod
+
+        print(
+            f"[mlbetl] espn {_espn_mod.__file__} extract_revision={getattr(_espn_mod, 'PARSER_EXTRACT_REVISION', '?')}",
+            file=sys.stderr,
+        )
 
     engine = get_engine(args.db)
     create_tables(engine)
@@ -113,6 +127,15 @@ def main() -> None:
         core = parse_game_core(summary, game_id)
         bat, pit = parse_boxscore_lines(summary)
         cleaned = clean_game(core)
+
+        if args.verbose:
+            sp = core.starting_pitchers or {}
+            print(
+                f"[mlbetl] game_id={game_id} venue_name={core.venue_name!r} "
+                f"starters_home={sp.get('home')!r} starters_away={sp.get('away')!r} "
+                f"home_record={cleaned.get('home_record')!r} away_record={cleaned.get('away_record')!r}",
+                file=sys.stderr,
+            )
 
         now = datetime.now(tz=timezone.utc)
         game_row = {
