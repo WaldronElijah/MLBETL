@@ -1,8 +1,24 @@
 # MLBETL (ESPN → Postgres → FastAPI)
 
-Ingest MLB game and boxscore data from ESPN’s **JSON summary** API, normalize into Postgres, and read it back through a small **FastAPI** service.
+This project is a small end-to-end pipeline for MLB games:
 
-## Install
+- Pull game + boxscore data from ESPN’s JSON “summary” endpoint
+- Normalize it into a Postgres schema (games + player lines)
+- Serve it back through a lightweight FastAPI read API
+
+It’s basically “grab messy sports JSON, turn it into tables, then make it easy to query”.
+
+## Tech stack
+
+- **Python**: ETL + API
+- **Postgres**: storage
+- **SQLAlchemy + Alembic**: models/migrations
+- **FastAPI + Uvicorn**: read API
+- **Pytest + GitHub Actions**: tests/CI
+
+## Quick start
+
+Create a venv and install:
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -10,106 +26,69 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-Copy `.env.example` to `.env` and set `DATABASE_URL`.
-
-After pulling parser changes, prefer **`pip install -e .`** (or `PYTHONPATH=src` on every command) so Python does not import an older `mlbetl` from another path.
-
-### Troubleshooting: venue / starters / records stay NULL in Postgres
-
-The parser fills those from ESPN’s `gameInfo.venue`, `competitors[].probables`, and `competitors[].record`. If **odds and scores update** but those columns stay NULL, the run is often using **stale code** (wrong `mlbetl` on `PYTHONPATH`).
-
-1. Verify which module file runs:
-
-   ```bash
-   PYTHONPATH=src python -c "import mlbetl.espn as e; print(e.__file__, getattr(e, 'PARSER_EXTRACT_REVISION', 0))"
-   ```
-
-   You should see your project’s `src/mlbetl/espn.py` and **`PARSER_EXTRACT_REVISION` 2** (or higher).
-
-2. Re-run ingest with diagnostics:
-
-   ```bash
-   PYTHONPATH=src python -m mlbetl.run --mode range --start 401814703 --end 401814703 -v
-   ```
-
-   Stderr should show non-null `venue_name` and starter names when ESPN returns them.
-
-3. If `(base)` conda and `.venv` are both active, ensure **`which python`** points at `.venv/bin/python` before `pip install -e .`.
-
-## Database schema
-
-Create tables with Alembic (recommended):
+Set env vars:
 
 ```bash
-export DATABASE_URL="postgresql+psycopg2://user:pass@localhost:5432/mlb"
-source .venv/bin/activate
+cp .env.example .env
+# set DATABASE_URL in .env
+```
+
+Run migrations:
+
+```bash
+set -a && source .env && set +a
 PYTHONPATH=src alembic upgrade head
 ```
 
-For quick local experiments you can also rely on `create_tables` in the ingest command, but **Alembic is the source of truth** for the expected schema.
+## Run the ETL
 
-## Ingest (ETL)
+Two common modes:
 
-From the project root, **`PYTHONPATH` must include `src`** so `mlbetl` imports resolve.
-
-**Game ID range** (404s skipped):
+- **Game ID range** (skips 404s):
 
 ```bash
-export DATABASE_URL="postgresql+psycopg2://user:pass@localhost:5432/mlb"
+set -a && source .env && set +a
 PYTHONPATH=src python -m mlbetl.run --mode range --start 401814703 --end 401814733 --db "$DATABASE_URL"
 ```
 
-**Scoreboard by date** (one or more `YYYYMMDD`, comma-separated):
+- **Scoreboard by date** (`YYYYMMDD`, comma-separated):
 
 ```bash
-PYTHONPATH=src python -m mlbetl.run --mode schedule --dates 20260330,20260331
+set -a && source .env && set +a
+PYTHONPATH=src python -m mlbetl.run --mode schedule --dates 20260330,20260331 --db "$DATABASE_URL"
 ```
 
-Options:
-
-- `--save-raw DIR` — write each raw ESPN summary JSON to `DIR/<game_id>.json`.
-- `--sleep SECONDS` — delay between requests (default from `ESPN_REQUEST_DELAY_S` or `0.35`).
-- `--db URL` — override `DATABASE_URL`.
-- `-q` / `--quiet` — suppress discovery and final `done:` summary lines on stderr.
-
-**Schedule run summaries (stderr):** After resolving the scoreboard, the CLI prints how many unique game IDs were found, e.g. `[mlbetl] schedule: dates=20260401 unique_game_ids=12`. When the loop finishes, it prints `[mlbetl] done: scheduled=N ok=K failed=M`. Counts come from ESPN for that day (nothing is hardcoded).
-
-### Daily automation (cron & GitHub Actions)
-
-**GitHub Actions:** [.github/workflows/etl-daily.yml](.github/workflows/etl-daily.yml) runs on a UTC `schedule` (default 11:00 UTC) and on `workflow_dispatch`. Add a repository secret **`DATABASE_URL`** with your SQLAlchemy URL. The workflow ingests the **previous** Eastern calendar day so a morning run targets the completed slate: `DATES=$(TZ=America/New_York date -d yesterday +%Y%m%d)` (GNU `date`, as on `ubuntu-latest`). The runner must be able to reach your Postgres host (Supabase pooler, public host, or a self-hosted runner if the DB is IP-restricted). GitHub’s `schedule` event can be delayed; it is not real-time. This workflow does not run `alembic upgrade`; apply migrations where you deploy the database.
-
-**Cron (VPS or Linux host):** Same as Actions — **yesterday** in Eastern time (GNU `date`):
+- **Calendar range** (inclusive; good for backfills), with polite pacing:
 
 ```bash
-# 6:05 AM America/New_York daily — adjust path and how you load DATABASE_URL
-5 6 * * * cd /path/to/MLBETL && . .venv/bin/activate && export DATABASE_URL="postgresql+psycopg2://..." && DATES=$(TZ=America/New_York date -d yesterday +%Y%m%d) && PYTHONPATH=src python -m mlbetl.run --mode schedule --dates "$DATES" --db "$DATABASE_URL"
+set -a && source .env && set +a
+# Example: fill opening week through 2026-03-29 if your DB already starts at 2026-03-30
+PYTHONPATH=src python -m mlbetl.run --mode schedule --date-from 20260326 --date-to 20260329 --db "$DATABASE_URL" --sleep 0.35
 ```
 
-**macOS cron:** BSD `date` has no `-d`; use e.g. `DATES=$(TZ=America/New_York date -v-1d +%Y%m%d)`.
+**GitHub Actions:** [.github/workflows/etl-daily.yml](.github/workflows/etl-daily.yml) runs on a daily UTC cron and ingests **yesterday’s calendar date in `America/New_York`** (same convention as MLB’s Eastern scoreboard day). Set the `DATABASE_URL` repository secret. Manual runs can pass comma-separated `dates` under **workflow_dispatch**.
 
-To also refresh the current Eastern day (e.g. late games), pass two comma-separated `YYYYMMDD` values (yesterday and today). On GNU/Linux: `$(TZ=America/New_York date -d yesterday +%Y%m%d),$(TZ=America/New_York date +%Y%m%d)`; on macOS use `date -v-1d` for yesterday and plain `date` for today. That doubles scoreboard requests for those runs.
+Useful flags:
 
-## Read API (FastAPI)
+- `--save-raw DIR` to write raw ESPN JSON files
+- `--sleep SECONDS` to slow down requests
+
+## Run the API
 
 ```bash
-export DATABASE_URL="postgresql+psycopg2://user:pass@localhost:5432/mlb"
+set -a && source .env && set +a
 PYTHONPATH=src uvicorn mlbetl.api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 - Swagger UI: `http://localhost:8000/docs`
-- `GET /api/games` — filters: `date_from`, `date_to`, `team`, `status`, `winner`, `rl_winner`, `ou_result`, `limit`, `offset`
-- `GET /api/games/{game_id}?include_boxscore=true`
-- `GET /api/teams/{team}/games` — same date/status filters; `team` is a substring match on home or away name.
+- Main endpoints:
+  - `GET /api/games`
+  - `GET /api/games/{game_id}?include_boxscore=true`
+  - `GET /api/teams/{team}/games`
 
-CORS for local Next.js: set `CORS_ORIGINS` in `.env` (comma-separated).
+If you’re calling it from a local frontend, set `CORS_ORIGINS` in `.env`.
 
-## Data model (high level)
+## Automation / CI
 
-- **`games`**: metadata, venue fields, starters, pickcenter JSON, DraftKings blob if found, umpires, normalized `status`, derived `winner` / `margin` / `total_runs` / `rl_winner` / `ou_result` when the game is final and lines exist.
-- **`batting_lines` / `pitching_lines`**: one row per player line; `stats` is JSONB.
-
-Run line convention in `clean_game`: `opening_spread` is the **home** team’s line from ESPN (e.g. -1.5 = home favored 1.5). Home covers when \((home\_score - away\_score) > -spread\).
-
-## Next.js frontend
-
-Use `NEXT_PUBLIC_API_URL=http://localhost:8000` and call only the FastAPI routes above (no ESPN from the browser). Scaffold with `create-next-app` in a sibling directory when you are ready.
+- **Daily ingest**: GitHub Actions workflow (scheduled + manual). It expects a repo secret named `DATABASE_URL` pointing to a hosted Postgres instance (not `localhost`).
+- **Tests**: `.github/workflows/test.yml` runs `pytest` on pushes/PRs.

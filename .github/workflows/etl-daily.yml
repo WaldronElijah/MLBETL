@@ -1,12 +1,17 @@
-# Daily MLB schedule ingest. Cron is UTC; ingest uses the previous America/New_York calendar day (yesterday).
+# Daily MLB schedule ingest. Cron is UTC; scheduled runs ingest the previous America/New_York calendar day.
 # Repository secret: DATABASE_URL (SQLAlchemy URL, e.g. postgresql+psycopg2://...)
 name: ETL daily
 
 on:
   schedule:
-    # 11:00 UTC (~6–7 AM Eastern). Adjust if you want a different wall-clock.
-    - cron: "0 11 * * *"
+    # 14:00 UTC ≈ 9–10 AM Eastern (EST/EDT): morning US time after most “yesterday” games have finished.
+    - cron: "0 14 * * *"
   workflow_dispatch:
+    inputs:
+      dates:
+        description: "Comma-separated YYYYMMDD for backfill (leave empty for America/New_York yesterday)"
+        required: false
+        type: string
 
 jobs:
   ingest:
@@ -25,10 +30,22 @@ jobs:
 
       - name: Run schedule ingest
         run: |
-          set -o pipefail
-          DATES=$(TZ=America/New_York date -d yesterday +%Y%m%d)
-          echo "Ingesting dates=$DATES (America/New_York, yesterday)"
-          PYTHONPATH=src python -m mlbetl.run --mode schedule --dates "$DATES" --db "$DATABASE_URL" 2>&1 | tee etl.log
+          set -e -o pipefail
+          if [ -z "${DATABASE_URL}" ]; then
+            echo "::error::DATABASE_URL is not set (add the repo secret)"
+            exit 1
+          fi
+          WD_RAW="${{ github.event.inputs.dates }}"
+          WD_TRIMMED="${WD_RAW#"${WD_RAW%%[![:space:]]*}"}"
+          WD_TRIMMED="${WD_TRIMMED%"${WD_TRIMMED##*[![:space:]]}"}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${WD_TRIMMED}" ]; then
+            DATES="${WD_TRIMMED}"
+            echo "Ingesting dates=${DATES} (workflow_dispatch)"
+          else
+            DATES=$(TZ=America/New_York date -d yesterday +%Y%m%d)
+            echo "Ingesting dates=${DATES} (America/New_York calendar yesterday; today there is $(TZ=America/New_York date +%F))"
+          fi
+          PYTHONPATH=src python -m mlbetl.run --mode schedule --dates "$DATES" --db "$DATABASE_URL" --sleep 0.35 2>&1 | tee etl.log
 
       - name: Job summary
         if: always()
