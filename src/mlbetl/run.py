@@ -5,7 +5,7 @@ import json
 import sys
 import time
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 try:
@@ -39,6 +39,20 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Comma-separated dates YYYYMMDD (schedule mode), e.g. 20260330,20260331",
     )
+    p.add_argument(
+        "--date-from",
+        type=str,
+        default=None,
+        metavar="YYYYMMDD",
+        help="Schedule mode: first calendar day inclusive (use with --date-to)",
+    )
+    p.add_argument(
+        "--date-to",
+        type=str,
+        default=None,
+        metavar="YYYYMMDD",
+        help="Schedule mode: last calendar day inclusive (use with --date-from)",
+    )
     p.add_argument("--db", type=str, default=None, help="SQLAlchemy DB url (or use DATABASE_URL)")
     p.add_argument(
         "--save-raw",
@@ -68,21 +82,86 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def _game_ids_for_args(args: argparse.Namespace) -> list[int]:
-    if args.mode == "range":
-        if args.start is None or args.end is None:
-            print("--start and --end are required for --mode range", file=sys.stderr)
-            sys.exit(2)
-        return list(range(args.start, args.end + 1))
-    if not args.dates:
-        print("--dates is required for --mode schedule", file=sys.stderr)
+def _parse_yyyymmdd(s: str) -> date:
+    t = s.strip()
+    if len(t) != 8 or not t.isdigit():
+        print(f"invalid YYYYMMDD: {t!r}", file=sys.stderr)
         sys.exit(2)
-    return [d.strip() for d in args.dates.split(",") if d.strip()]
+    y, m, d = int(t[:4]), int(t[4:6]), int(t[6:8])
+    try:
+        return date(y, m, d)
+    except ValueError:
+        print(f"invalid calendar date: {t!r}", file=sys.stderr)
+        sys.exit(2)
+
+
+def _range_game_ids_for_args(args: argparse.Namespace) -> list[int]:
+    if args.start is None or args.end is None:
+        print("--start and --end are required for --mode range", file=sys.stderr)
+        sys.exit(2)
+    return list(range(args.start, args.end + 1))
+
+
+def _schedule_days_for_args(args: argparse.Namespace) -> tuple[list[str], str]:
+    has_dates = bool(args.dates and args.dates.strip())
+    has_from = args.date_from is not None
+    has_to = args.date_to is not None
+
+    if has_dates and (has_from or has_to):
+        print("use either --dates or --date-from/--date-to, not both", file=sys.stderr)
+        sys.exit(2)
+    if has_from ^ has_to:
+        print("--date-from and --date-to must be used together", file=sys.stderr)
+        sys.exit(2)
+
+    if has_dates:
+        parts = [d.strip() for d in args.dates.split(",") if d.strip()]
+        if not parts:
+            print("--dates is empty", file=sys.stderr)
+            sys.exit(2)
+        for p in parts:
+            _parse_yyyymmdd(p)
+        return parts, args.dates.strip()
+
+    if has_from and has_to:
+        start = _parse_yyyymmdd(args.date_from)
+        end = _parse_yyyymmdd(args.date_to)
+        if end < start:
+            print("--date-to must be on or after --date-from", file=sys.stderr)
+            sys.exit(2)
+        out: list[str] = []
+        cur = start
+        while cur <= end:
+            out.append(cur.strftime("%Y%m%d"))
+            cur += timedelta(days=1)
+        label = f"{out[0]}..{out[-1]}" if out else ""
+        return out, label
+
+    print(
+        "--dates or (--date-from and --date-to) is required for --mode schedule",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
 
 def main() -> None:
     load_dotenv()
     args = _parse_args()
+    if args.mode == "range" and (args.dates or args.date_from or args.date_to):
+        print(
+            "--dates / --date-from / --date-to apply only to --mode schedule",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if args.mode == "schedule" and (args.start is not None or args.end is not None):
+        print("--start and --end apply only to --mode range", file=sys.stderr)
+        sys.exit(2)
+
+    spec_days: list[str] | None = None
+    dates_label = ""
+    if args.mode == "schedule":
+        spec_days, dates_label = _schedule_days_for_args(args)
+
     settings = get_settings()
     delay = args.sleep if args.sleep is not None else settings.request_delay_s
 
@@ -103,11 +182,10 @@ def main() -> None:
     if raw_root:
         raw_root.mkdir(parents=True, exist_ok=True)
 
-    spec = _game_ids_for_args(args)
-
     if args.mode == "schedule":
+        assert spec_days is not None
         game_ids: list[int] = []
-        for day in spec:
+        for day in spec_days:
             try:
                 game_ids.extend(fetch_scoreboard_event_ids(client, day))
             except Exception:
@@ -116,12 +194,12 @@ def main() -> None:
                 time.sleep(delay)
         game_ids = sorted(set(game_ids))
     else:
-        game_ids = spec  # type: ignore[assignment]
+        game_ids = _range_game_ids_for_args(args)
 
     if not args.quiet:
-        if args.mode == "schedule" and args.dates:
+        if args.mode == "schedule":
             print(
-                f"[mlbetl] schedule: dates={args.dates.strip()} unique_game_ids={len(game_ids)}",
+                f"[mlbetl] schedule: dates={dates_label} unique_game_ids={len(game_ids)}",
                 file=sys.stderr,
             )
         elif args.mode == "range":
