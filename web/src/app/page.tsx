@@ -1,47 +1,80 @@
-import Link from "next/link";
-import { fetchGamesList } from "@/lib/api";
+import {
+  fetchGamesList,
+  fetchRunLineTeamStats,
+} from "@/lib/api";
+import { DateRangeFilter } from "./_components/date-range-filter";
+import { GameListTable } from "./_components/game-list-table";
+import { HomeTabNav, type HomeTab } from "./_components/home-tab-nav";
+import { RunLineStatsTable } from "./_components/run-line-stats-table";
 
 export const dynamic = "force-dynamic";
 
-function fmtDate(iso: string | null): string {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    });
-  } catch {
-    return iso;
-  }
+function firstString(
+  v: string | string[] | undefined,
+): string | undefined {
+  if (v == null) return undefined;
+  return Array.isArray(v) ? v[0] : v;
 }
 
-export default async function Home() {
-  let games: Awaited<ReturnType<typeof fetchGamesList>>;
+function normalizeTab(raw: string | undefined): HomeTab {
+  if (raw === "ats" || raw === "line") return raw;
+  return "games";
+}
+
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
+  const tab = normalizeTab(firstString(sp.tab));
+  const date_from = firstString(sp.date_from);
+  const date_to = firstString(sp.date_to);
+  const dates = { date_from, date_to };
+
+  const listParams = {
+    limit: 50,
+    ...(date_from ? { date_from } : {}),
+    ...(date_to ? { date_to } : {}),
+  };
+
+  const statsParams = {
+    ...(date_from ? { date_from } : {}),
+    ...(date_to ? { date_to } : {}),
+    min_games: 1,
+  };
+
   let error: string | null = null;
+  let games: Awaited<ReturnType<typeof fetchGamesList>> = [];
+  let stats: Awaited<ReturnType<typeof fetchRunLineTeamStats>> = [];
+
   try {
-    games = await fetchGamesList({ limit: 50 });
+    if (tab === "games") {
+      games = await fetchGamesList(listParams);
+    } else {
+      stats = await fetchRunLineTeamStats(statsParams);
+    }
   } catch (e) {
-    games = [];
-    error = e instanceof Error ? e.message : "Failed to load games";
+    error = e instanceof Error ? e.message : "Failed to load data";
   }
 
   return (
     <div className="min-h-full bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <main className="mx-auto max-w-6xl px-4 py-10">
-        <header className="mb-8">
+        <header className="mb-6">
           <h1 className="text-2xl font-semibold tracking-tight">MLB games</h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            Read-only list from the MLBETL FastAPI (
-            <code className="rounded bg-zinc-200/80 px-1 py-0.5 text-xs dark:bg-zinc-800">
-              GET /api/games
-            </code>
-            ). Run the API on port 8000 or set{" "}
+            Read-only data from the MLBETL FastAPI. Run the API on port 8000 or
+            set{" "}
             <code className="rounded bg-zinc-200/80 px-1 py-0.5 text-xs dark:bg-zinc-800">
               NEXT_PUBLIC_API_URL
             </code>
             .
           </p>
         </header>
+
+        <HomeTabNav active={tab} dates={dates} />
+        <DateRangeFilter tab={tab} date_from={date_from} date_to={date_to} />
 
         {error ? (
           <div
@@ -50,54 +83,12 @@ export default async function Home() {
           >
             {error}
           </div>
+        ) : tab === "games" ? (
+          <GameListTable games={games} />
+        ) : tab === "ats" ? (
+          <RunLineStatsTable rows={stats} variant="ats" />
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-            <table className="w-full min-w-[720px] text-left text-sm">
-              <thead className="border-b border-zinc-200 bg-zinc-50 text-xs font-medium uppercase tracking-wide text-zinc-600 dark:border-zinc-800 dark:bg-zinc-800/50 dark:text-zinc-400">
-                <tr>
-                  <th className="px-3 py-2">Date</th>
-                  <th className="px-3 py-2">Away</th>
-                  <th className="px-3 py-2">Home</th>
-                  <th className="px-3 py-2 text-right">Score</th>
-                  <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2">Winner</th>
-                  <th className="px-3 py-2 w-24" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                {games.map((g) => (
-                  <tr
-                    key={g.game_id}
-                    className="hover:bg-zinc-50/80 dark:hover:bg-zinc-800/40"
-                  >
-                    <td className="whitespace-nowrap px-3 py-2 text-zinc-600 dark:text-zinc-400">
-                      {fmtDate(g.date_utc)}
-                    </td>
-                    <td className="px-3 py-2">{g.away_team ?? "—"}</td>
-                    <td className="px-3 py-2">{g.home_team ?? "—"}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
-                      {g.away_score ?? "—"} @ {g.home_score ?? "—"}
-                    </td>
-                    <td className="px-3 py-2">{g.status ?? g.game_status ?? "—"}</td>
-                    <td className="px-3 py-2">{g.winner ?? "—"}</td>
-                    <td className="px-3 py-2">
-                      <Link
-                        href={`/games/${g.game_id}`}
-                        className="font-medium text-blue-600 hover:underline dark:text-blue-400"
-                      >
-                        Details
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {games.length === 0 && !error && (
-              <p className="px-4 py-8 text-center text-sm text-zinc-500">
-                No games returned. Ingest data or widen filters in the API.
-              </p>
-            )}
-          </div>
+          <RunLineStatsTable rows={stats} variant="line" />
         )}
       </main>
     </div>

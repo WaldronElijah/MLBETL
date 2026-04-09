@@ -44,3 +44,14 @@ export type GameDetailOut = GameOut & {
   batting_lines: BoxscoreLineOut[];
   pitching_lines: BoxscoreLineOut[];
 };
+
+/** GET /api/stats/run-line-by-team */
+export type TeamRunLineStatsOut = {
+  team: string;
+  games: number;
+  covers: number;
+  losses: number;
+  pushes: number;
+  ats_pct: number | null;
+  avg_margin_vs_line: number | null;
+};
