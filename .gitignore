@@ -25,6 +25,7 @@ env/
 .env
 .env.*
 !.env.example
+!web/.env.local.example
 
 # Testing / coverage / type-check caches
 .pytest_cache/
