@@ -53,3 +53,15 @@ class GameOut(BaseModel):
 class GameDetailOut(GameOut):
     batting_lines: list[BoxscoreLineOut] = []
     pitching_lines: list[BoxscoreLineOut] = []
+
+
+class TeamRunLineStatsOut(BaseModel):
+    """Per-team aggregates over final games with an opening run line."""
+
+    team: str
+    games: int
+    covers: int
+    losses: int
+    pushes: int
+    ats_pct: Optional[float] = None
+    avg_margin_vs_line: Optional[float] = None

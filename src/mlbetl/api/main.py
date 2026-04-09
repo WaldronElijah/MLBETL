@@ -13,7 +13,7 @@ except ImportError:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from mlbetl.api.routers import games, teams
+from mlbetl.api.routers import games, stats, teams
 from mlbetl.config import get_settings
 
 
@@ -40,6 +40,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(games.router, prefix="/api")
     app.include_router(teams.router, prefix="/api")
+    app.include_router(stats.router, prefix="/api")
 
     @app.get("/health")
     def health() -> dict[str, str]:
